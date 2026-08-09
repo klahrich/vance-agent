@@ -1,0 +1,9 @@
+.env
+.git
+.vapi-resources.json
+data
+dist
+node_modules
+profiles
+test
+*.log

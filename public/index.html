@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f0e8" />
+    <title>Vance Call Room</title>
+    <link rel="stylesheet" href="/styles.css?v=20260808-4" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <main class="shell">
+      <section id="gate" class="gate" aria-labelledby="gate-title">
+        <div class="brand-mark" aria-label="Vance">VANCE<span>↵</span></div>
+        <p class="eyebrow">Private call room</p>
+        <h1 id="gate-title">Let’s get you in.</h1>
+        <p class="lede">Enter your dashboard passcode to place and monitor Vance’s calls.</p>
+        <form id="unlock-form" class="unlock-form">
+          <label for="passcode">Passcode</label>
+          <div class="field-row">
+            <input id="passcode" type="password" autocomplete="current-password" required autofocus />
+            <button type="submit" class="button button-dark">Open call room</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="dashboard" class="dashboard" hidden>
+        <header class="topbar">
+          <div class="brand-mark" aria-label="Vance">VANCE<span>↵</span></div>
+          <div class="system-state"><span class="status-light"></span> Call room ready</div>
+          <button id="lock-button" class="text-button" type="button">Lock</button>
+        </header>
+
+        <div class="intro">
+          <div>
+            <p class="eyebrow">Call control</p>
+            <h1>Vance is on it.</h1>
+          </div>
+          <p>Place the call, listen quietly, and step in only if you want to end it.</p>
+        </div>
+
+        <div class="control-grid">
+          <section class="call-panel" aria-labelledby="call-title">
+            <div class="panel-heading">
+              <h2 id="call-title">New call</h2>
+              <span id="status-chip" class="status-chip is-idle">Standing by</span>
+            </div>
+
+            <form id="call-form">
+              <label for="destination">Number to call</label>
+              <input id="destination" class="phone-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 555 555 0100" required />
+              <div class="caller-line">
+                <span>Calling from</span>
+                <strong id="caller-number">—</strong>
+              </div>
+
+              <div class="primary-actions">
+                <button id="call-button" class="button button-red" type="submit">
+                  <span class="call-icon" aria-hidden="true">↗</span>
+                  Start call
+                </button>
+                <button id="hangup-button" class="button button-outline-danger" type="button" disabled>
+                  Hang up
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section class="live-panel" aria-labelledby="live-title">
+            <div class="live-topline">
+              <div>
+                <p class="eyebrow">Live call</p>
+                <h2 id="live-title">Nothing active</h2>
+              </div>
+              <time id="duration">00:00</time>
+            </div>
+
+            <div id="signal" class="signal" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+
+            <div class="monitor-row">
+              <div>
+                <strong>Quiet monitor</strong>
+                <span id="listen-caption">Available once the call connects</span>
+              </div>
+              <button id="listen-button" class="button button-monitor" type="button" disabled>
+                <span aria-hidden="true">◉</span> Listen
+              </button>
+            </div>
+
+            <dl class="call-facts">
+              <div><dt>Destination</dt><dd id="active-destination">—</dd></div>
+              <div><dt>Call ID</dt><dd id="call-id">—</dd></div>
+              <div><dt>Outcome</dt><dd id="outcome">In progress</dd></div>
+            </dl>
+          </section>
+        </div>
+
+        <section class="transcript-panel" aria-labelledby="transcript-title">
+          <div class="transcript-heading">
+            <div>
+              <p class="eyebrow">Conversation</p>
+              <h2 id="transcript-title">Live transcript</h2>
+            </div>
+            <span id="transcript-state">Waiting for a call</span>
+          </div>
+          <div id="transcript" class="transcript" aria-live="polite">
+            <div class="empty-state">
+              <span>↗</span>
+              <p>Once Vance starts talking, the conversation will show up here.</p>
+            </div>
+          </div>
+        </section>
+
+        <footer>
+          <span>Private dashboard · Keep your passcode to yourself</span>
+          <span>Vance call line <strong id="footer-caller-number">—</strong></span>
+        </footer>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js?v=20260808-4"></script>
+  </body>
+</html>

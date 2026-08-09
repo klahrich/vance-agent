@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.DS_Store
+.env
+.env.*
+!.env.example
+.vapi-resources.json
+profiles/*.txt
+!profiles/example.txt
+data/
+coverage/
+*.log
