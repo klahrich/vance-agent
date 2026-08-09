@@ -2,6 +2,15 @@
   "name": "vance-loyalty-agent",
   "version": "0.1.0",
   "private": true,
+  "description": "An autonomous Pi + Vapi voice agent that negotiates telecom bills.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lhqezio/vance-agent.git"
+  },
+  "homepage": "https://github.com/lhqezio/vance-agent#readme",
+  "bugs": {
+    "url": "https://github.com/lhqezio/vance-agent/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.19.0"
