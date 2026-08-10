@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { hasContext, loadContextText } from "./config.js";
 import { persistenceEnabled } from "./db/index.js";
+import { extractOutcome } from "./extract.js";
 import { startReconciler } from "./reconcile.js";
 import { createBrief, recordCallStarted, saveArtifacts, updateCallProgress } from "./store.js";
 import { isMissionName, listMissions, loadMission } from "./missions/loader.js";
@@ -170,6 +171,45 @@ function acceptLiveSubscriber(callId: string, req: IncomingMessage, res: ServerR
   });
 }
 
+/**
+ * Extract the deliverable ourselves when Vapi's analysis did not.
+ *
+ * Vapi's structured extraction works on short calls and came back absent —
+ * no error, no partial object — on a 24-minute one. This runs on the webhook
+ * path rather than only in the reconciler so that it works with no database
+ * configured, which is the situation a long call is most likely to be in.
+ *
+ * The result reaches the dashboard, the log, and (when persistence is on) the
+ * database. Deliberately not awaited: the webhook must return promptly, and
+ * nothing downstream is waiting on this.
+ */
+async function backfillOutcome(
+  callId: string,
+  call: VapiCall | undefined,
+  live: LiveTranscript,
+): Promise<void> {
+  const mission = call?.metadata?.mission;
+  if (typeof mission !== "string" || !live.messages.length) return;
+  try {
+    const structuredData = await extractOutcome(
+      mission,
+      live.messages.map((m) => ({
+        role: m.role === "vance" ? "assistant" : "user",
+        message: m.message,
+        secondsFromStart: m.secondsFromStart,
+      })),
+    );
+    if (!structuredData) return;
+    live.analysis = { ...(live.analysis ?? {}), structuredData };
+    console.log(JSON.stringify({ event: "extracted", callId, mission, structuredData }));
+    await saveArtifacts(callId, { structuredData });
+    broadcastCall({ ...(call ?? { id: callId }), id: callId });
+  } catch (error) {
+    // The reconciler retries this, and `npm run extract` recovers it by hand.
+    console.warn(`[extract] backfill for ${callId} failed:`, (error as Error).message);
+  }
+}
+
 /** Fire-and-forget write of everything a finished call produced. The
  *  reconciler will do this again from Vapi regardless, so a failure here is a
  *  delay rather than a loss — which is exactly why it is allowed to be async
@@ -271,6 +311,7 @@ function handleVapiEvent(payload: any): void {
       console.log(JSON.stringify({ event: "outcome", callId, analysis: live.analysis }));
     }
     void persist(callId, call, live, analysis);
+    if (!analysis?.structuredData) void backfillOutcome(callId, call, live);
   }
 
   if (message.type === "status-update") {
