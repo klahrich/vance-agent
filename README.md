@@ -1,5 +1,8 @@
 # Vance
 
+> **AI agent working here? Read [AGENTS.md](AGENTS.md) first, then
+> [HANDOFF.md](HANDOFF.md) for where things currently stand.**
+
 Vance is a voice agent that runs phone calls on your behalf. It navigates
 IVRs, waits on hold, talks naturally with whoever picks up, does the thing it
 was sent to do, and hangs up by itself.
@@ -137,6 +140,10 @@ were all invisible to both commands.
 
 ## Docs
 
+- [`AGENTS.md`](AGENTS.md) — rules for anyone (human or AI) changing this
+  code. Each one comes from a real incident.
+- [`HANDOFF.md`](HANDOFF.md) — current state: what is deployed, what is
+  proven, what is broken, what is next.
 - [`learnings/`](learnings/README.md) — what was learned the expensive
   way, dated. Read before optimising anything.
 - [`stories/`](stories/) — design decisions and phasing.

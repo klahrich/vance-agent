@@ -10,3 +10,6 @@ contexts/*.txt
 data/
 coverage/
 *.log
+
+# Extracted deliverables — client data, never committed.
+out/
