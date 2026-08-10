@@ -1,5 +1,7 @@
 import { env } from "./config.js";
-import { VANCE_SYSTEM_PROMPT } from "./vapi-prompt.js";
+import type { Mission } from "./missions/types.js";
+import { composeSystemPrompt } from "./prompt/compose.js";
+import { conductPlan } from "./vapi/conduct.js";
 
 const API = "https://api.vapi.ai";
 
@@ -32,6 +34,7 @@ export interface VapiCall {
   startedAt?: string;
   endedAt?: string;
   customer?: { number?: string };
+  metadata?: Record<string, unknown>;
   monitor?: {
     listenUrl?: string;
     controlUrl?: string;
@@ -45,15 +48,72 @@ export interface VapiCall {
   };
 }
 
-export async function createVapiCall(destination: string, profileText: string): Promise<VapiCall> {
+/**
+ * Build the whole assistant inline rather than referencing a provisioned one.
+ *
+ * Missions differ in prompt, tools, voice, pacing and duration, which an
+ * override on a baked assistant expresses badly. More importantly a
+ * provisioned assistant drifts: the file and the Vapi resource disagree the
+ * moment someone forgets to re-run a sync step. Building per call means
+ * editing a mission file is the entire deploy story.
+ */
+export function buildAssistant(mission: Mission, contextText: string): Record<string, unknown> {
+  const publicUrl = env("PUBLIC_BASE_URL").replace(/\/$/, "");
+  const plan = conductPlan(mission.conduct);
+
+  return {
+    name: `Vance — ${mission.name}`,
+    credentialIds: [env("VAPI_CUSTOM_LLM_CREDENTIAL_ID")],
+    ...(mission.opens === "vance"
+      ? { firstMessageMode: "assistant-speaks-first", firstMessage: mission.firstMessage }
+      : { firstMessageMode: "assistant-waits-for-user" }),
+    responseDelaySeconds: 0,
+    // Long enough to survive a hold queue without the platform deciding the
+    // call has died. CORE is what actually keeps Vance quiet during it.
+    silenceTimeoutSeconds: Number(process.env.VAPI_SILENCE_TIMEOUT_SECONDS ?? 1800),
+    maxDurationSeconds: mission.maxMinutes * 60,
+    monitorPlan: { listenEnabled: true, controlEnabled: true },
+    ...plan,
+    model: {
+      provider: "custom-llm",
+      url: `${publicUrl}/v1/chat/completions`,
+      model: "vance-pi",
+      messages: [{ role: "system", content: composeSystemPrompt(mission, contextText) }],
+      tools: mission.tools.map((type) => ({ type })),
+      temperature: 0.2,
+    },
+    voice: {
+      provider: process.env.VAPI_VOICE_PROVIDER ?? "vapi",
+      voiceId: mission.voice ?? process.env.VAPI_VOICE_ID ?? "Elliot",
+    },
+    server: {
+      url: `${publicUrl}/vapi/events`,
+      ...(process.env.VAPI_WEBHOOK_CREDENTIAL_ID
+        ? { credentialId: process.env.VAPI_WEBHOOK_CREDENTIAL_ID }
+        : {}),
+    },
+    serverMessages: [
+      "status-update",
+      "end-of-call-report",
+      "hang",
+      "transcript",
+      "conversation-update",
+    ],
+  };
+}
+
+export async function createVapiCall(
+  mission: Mission,
+  destination: string,
+  contextText: string,
+): Promise<VapiCall> {
   return request("/call", {
     method: "POST",
     body: JSON.stringify({
-      assistantId: env("VAPI_ASSISTANT_ID"),
+      assistant: buildAssistant(mission, contextText),
       phoneNumberId: env("VAPI_PHONE_NUMBER_ID"),
       customer: { number: destination },
-      metadata: { initiatedBy: "vance-dashboard" },
-      assistantOverrides: { variableValues: { profile_text: profileText } },
+      metadata: { mission: mission.name, counterpart: mission.counterpart },
     }),
   });
 }
@@ -62,91 +122,56 @@ export async function getVapiCall(callId: string): Promise<VapiCall> {
   return request(`/call/${encodeURIComponent(callId)}`, { method: "GET" });
 }
 
-export async function endVapiCall(call: VapiCall): Promise<void> {
+/** `controlUrl` arrives in an API response, so treat it as untrusted input
+ *  before POSTing to it. */
+function controlEndpoint(call: VapiCall): string {
   const controlUrl = call.monitor?.controlUrl;
   if (!controlUrl) throw new Error("This call does not have live control enabled.");
-
   const parsed = new URL(controlUrl);
   if (parsed.protocol !== "https:" || !(parsed.hostname === "vapi.ai" || parsed.hostname.endsWith(".vapi.ai"))) {
     throw new Error("Vapi returned an invalid call control URL.");
   }
+  return controlUrl;
+}
 
-  const response = await fetch(controlUrl, {
+async function control(call: VapiCall, body: Record<string, unknown>): Promise<void> {
+  const response = await fetch(controlEndpoint(call), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "end-call" }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`Vapi call control ${response.status}: ${await response.text()}`);
 }
 
-export async function provisionVapi(): Promise<{ assistantId: string; customLlmCredentialId: string }> {
-  const publicUrl = env("PUBLIC_BASE_URL").replace(/\/$/, "");
-  const customLlmCredential = await request<{ id: string }>("/credential", {
+export async function endVapiCall(call: VapiCall): Promise<void> {
+  await control(call, { type: "end-call" });
+}
+
+/**
+ * Redirect a call in flight, without the other party hearing anything.
+ *
+ * This is what makes supervised calls worth running: a prompt that is subtly
+ * wrong can be corrected at minute four instead of discovered in the
+ * transcript afterwards.
+ */
+export async function steerVapiCall(call: VapiCall, instruction: string): Promise<void> {
+  await control(call, {
+    type: "add-message",
+    message: { role: "system", content: instruction },
+    triggerResponseEnabled: true,
+  });
+}
+
+/** One-time setup: the credential that lets Vapi authenticate to our
+ *  custom-LLM endpoint. Everything else about an assistant is now built per
+ *  call, so this is all that remains of provisioning. */
+export async function provisionCustomLlmCredential(): Promise<string> {
+  const credential = await request<{ id: string }>("/credential", {
     method: "POST",
     body: JSON.stringify({
       provider: "custom-llm",
       apiKey: env("PI_SERVER_API_KEY"),
     }),
   });
-  const webhookCredentialId = process.env.VAPI_WEBHOOK_CREDENTIAL_ID;
-  const eventServer = {
-    url: `${publicUrl}/vapi/events`,
-    ...(webhookCredentialId ? { credentialId: webhookCredentialId } : {}),
-  };
-
-  const assistant = await request<{ id: string }>("/assistant", {
-    method: "POST",
-    body: JSON.stringify({
-      name: "Vance Pi Agent",
-      credentialIds: [customLlmCredential.id],
-      firstMessageMode: "assistant-waits-for-user",
-      responseDelaySeconds: 0,
-      silenceTimeoutSeconds: Number(process.env.VAPI_SILENCE_TIMEOUT_SECONDS ?? 1800),
-      maxDurationSeconds: Number(process.env.VAPI_MAX_DURATION_SECONDS ?? 43200),
-      monitorPlan: { listenEnabled: true, controlEnabled: true },
-      startSpeakingPlan: {
-        waitSeconds: 0.15,
-        smartEndpointingPlan: { provider: "vapi" },
-      },
-      stopSpeakingPlan: {
-        numWords: 2,
-        voiceSeconds: 0.2,
-        backoffSeconds: 0.8,
-        acknowledgementPhrases: ["okay", "right", "yeah", "yes", "uh-huh", "mm-hmm", "got it", "sure", "alright"],
-      },
-      model: {
-        provider: "custom-llm",
-        url: `${publicUrl}/v1/chat/completions`,
-        model: "vance-pi",
-        messages: [{ role: "system", content: VANCE_SYSTEM_PROMPT }],
-        tools: [{ type: "dtmf" }, { type: "endCall" }],
-        temperature: 0.2,
-      },
-      voice: {
-        provider: process.env.VAPI_VOICE_PROVIDER ?? "vapi",
-        voiceId: process.env.VAPI_VOICE_ID ?? "Elliot",
-      },
-      server: eventServer,
-      serverMessages: ["status-update", "end-of-call-report", "hang", "assistant.started"],
-    }),
-  });
-
-  return { assistantId: assistant.id, customLlmCredentialId: customLlmCredential.id };
-}
-
-export async function startVapiCall(profileId: string, profileText: string, assistantId: string): Promise<{
-  id: string;
-  status?: string;
-  monitor?: { listenUrl?: string; controlUrl?: string };
-}> {
-  return request("/call", {
-    method: "POST",
-    body: JSON.stringify({
-      assistantId,
-      phoneNumberId: env("VAPI_PHONE_NUMBER_ID"),
-      customer: { number: env("BELL_PHONE_NUMBER") },
-      metadata: { profileId },
-      assistantOverrides: { variableValues: { profile_text: profileText } },
-    }),
-  });
+  return credential.id;
 }

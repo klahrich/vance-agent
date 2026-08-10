@@ -1,86 +1,127 @@
 # Vance
 
-Vance is an autonomous voice agent that calls a telecom provider on your behalf. It navigates the IVR, waits on hold, verifies the account, talks naturally with a representative, negotiates the bill, confirms the final terms, and ends the call itself.
+Vance is a voice agent that runs phone calls on your behalf. It navigates
+IVRs, waits on hold, talks naturally with whoever picks up, does the thing it
+was sent to do, and hangs up by itself.
 
-This version is built for Bell Canada using [Pi](https://github.com/earendil-works/pi/tree/main/packages/agent) as the sole reasoning agent and [Vapi](https://vapi.ai/) as the phone layer.
+What it does on any given call comes from a **mission** — one file describing
+the errand. Negotiating a telecom bill is one mission. Scoping a product with a
+client is another. Nothing in the code knows which.
 
-## What is in the repo
-
-- One Pi agent controls the whole conversation—there is no separate Vapi strategist.
-- Vapi handles transcription, voice, outbound calling, live monitoring, and keypad transport.
-- Vance distinguishes automated menus from people, stays quiet during IVR prompts, and sends DTMF when needed.
-- The account profile is ordinary text injected verbatim into the prompt. There is no JSON schema or deterministic parser.
-- A password-protected web call room can start and end calls, show the live transcript, and play the listen-only audio stream.
-- Long holds are supported with a configurable silence timeout.
+Built with [Pi](https://github.com/earendil-works/pi/tree/main/packages/agent)
+as the sole reasoning agent and [Vapi](https://vapi.ai/) as the phone layer.
 
 ```text
-Bell phone call
-      ↕
-Vapi — audio, transcript, voice, DTMF
-      ↕
+      phone call
+          ↕
+Vapi — audio, transcript, voice, DTMF, call control
+          ↕
 Vance server — OpenAI-compatible custom LLM endpoint
-      ↕
+          ↕
 Pi agent — reasoning, speech, keypad choices, hang-up
 ```
 
-## Requirements
+## How a call is assembled
 
-- Node.js 22.19 or newer
-- A Vapi account and a phone number that can place Canadian calls
-- An OpenAI API key
-- A public HTTPS URL for this service
+```text
+system prompt  =  CORE  +  mission body  +  context
+```
 
-The default brain configuration is `gpt-5.6-terra`, medium reasoning, and OpenAI Priority processing. Change `PI_MODEL` if that model is not available to your account.
+- **CORE** (`src/prompt/core.ts`) is call craft: telling a human from a hold
+  recording, staying silent through a menu, one-question-at-a-time turn taking,
+  knowing when the call is finished. True of every call, written once.
+- **The mission** (`missions/*.md`) is the errand. Frontmatter for the handful
+  of things code branches on; the rest is prose.
+- **The context** (`contexts/*.txt`, or pasted into the dashboard) is what you
+  know going in, in your own words. No schema. Never committed — it usually
+  holds an account number or something private about a client.
+
+The agent is **stateless**: Vapi owns the transcript and hands over the whole
+thing each turn, so the server can restart mid-call without anyone noticing,
+and no database sits in the audio path.
+
+## Missions
+
+```markdown
+---
+name: product-scoping
+description: Scope a software product with a prospective client
+counterpart: client          # what to call the other side in the transcript
+conduct: listening           # or: leading
+opens: vance                 # or: them
+firstMessage: Hi Jack, it's Vance calling on behalf of Karim...
+tools: [endCall]             # add dtmf when there's a phone tree
+maxMinutes: 60
+---
+
+You are running a scheduled discovery call to scope a software product...
+```
+
+`conduct` is the field to get right. `leading` starts speaking 150ms after the
+other person stops — snappy against a rep working from a script. `listening`
+waits 1.2s, because someone thinking out loud pauses mid-sentence, and an agent
+that talks over them twice will stop being told anything useful.
 
 ## Setup
 
 ```bash
 cp .env.example .env
-cp profiles/example.txt profiles/my-bell-account.txt
 npm ci
 ```
 
-Fill in `.env`, then write anything Vance should know in `profiles/my-bell-account.txt` using normal language. Include the account holder's identity, verification details, current services, goals, preferences, and the decisions Vance is allowed to make. The profile has no required fields or formatting.
-
-Start the Pi endpoint:
+Fill in `.env`, then create the one Vapi resource that isn't per-call:
 
 ```bash
-npm run dev
+npm run setup:credential      # prints VAPI_CUSTOM_LLM_CREDENTIAL_ID
 ```
 
-Provision a Vapi assistant backed directly by Pi:
+`PUBLIC_BASE_URL` must point at the deployed service before any call is placed
+— it is how Vapi reaches the reasoning endpoint.
 
 ```bash
-npm run setup:vapi
+npm run dev                   # local server
+npm run call -- line-check    # place a call
+npm run call -- bell-retention +14165550100 my-bell-account
 ```
 
-Start a call from the command line:
+`line-check` is a two-minute self-test: it checks audio, reads back what it
+heard, and asks you to interrupt it on purpose.
 
-```bash
-npm run call -- my-bell-account
-```
+## Call room
 
-The command prints Vapi's listen-only monitor URL when one is available.
+Open the service URL and enter `DASHBOARD_KEY`. Pick a mission, type a number,
+optionally paste context, and start the call. During the call you get:
 
-## Web call room
+- the live transcript, both sides
+- a quiet listen-only audio monitor
+- **Steer** — send Vance a private instruction mid-call. The other party hears
+  nothing. This is what makes supervised calls worth running: a prompt that is
+  subtly wrong gets corrected at minute four instead of discovered afterwards.
+- **Hang up**
 
-Open the service URL, enter `DASHBOARD_KEY`, type a destination number, and start the call. The dashboard shows call status, elapsed time, both sides of the transcript, and a quiet audio monitor. The **Hang up** button ends the Vapi call immediately.
+Steering and hang-up both need `monitorPlan.listenEnabled` and
+`controlEnabled`, which every mission sets.
 
-For monitoring and hang-up to work, the Vapi assistant needs both `monitorPlan.listenEnabled` and `monitorPlan.controlEnabled` set to `true`. The setup command configures both.
+## Deploying on Railway
 
-`VAPI_SILENCE_TIMEOUT_SECONDS` defaults to 1,800 seconds so Vance can remain connected through long queues and transfers. `VAPI_MAX_DURATION_SECONDS` controls the overall call ceiling.
+Node app, no Dockerfile. Set every value from `.env` as a Railway variable,
+point `PUBLIC_BASE_URL` at the generated domain, and pick a **US region** —
+each turn is Vapi → Railway → OpenAI → back, so region is in the latency
+budget.
 
-## Deploying on Fly.io
-
-The included `Dockerfile` and `fly.toml` match the running deployment. Change the app name in `fly.toml`, create the app, and store every value from `.env` as a Fly secret before deploying. Never put credentials or the real account profile in `fly.toml`.
-
-For a hosted deployment, store the raw profile in the `VANCE_PROFILE_TEXT` secret. Local development can continue to use `profiles/my-bell-account.txt`.
+`/health` is the health check.
 
 ## Privacy and authorization
 
-`.env`, Vapi resource IDs, real profiles, logs, and call data are excluded from Git. Keep them that way. Rotate any credential that is accidentally committed.
+`.env`, real contexts, logs, and call data are excluded from Git. Keep them
+that way. Rotate any credential that is accidentally committed.
 
-Only use Vance on an account you own or are authorized to manage. Follow the recording, automated-calling, disclosure, and consent rules that apply where you and the called party are located. The included prompt does not volunteer a technical announcement, but it instructs Vance to answer truthfully if directly asked whether it is AI.
+Only use Vance where you are authorized to act. Follow the recording,
+automated-calling, disclosure, and consent rules that apply where you and the
+called party are. CORE instructs Vance to answer truthfully whenever asked
+whether it is an AI; missions that speak to third parties on someone's behalf
+should disclose up front, in the first breath. See `stories/` for why that is
+tracked as a launch blocker rather than a preference.
 
 ## Verify
 

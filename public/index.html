@@ -48,12 +48,19 @@
             </div>
 
             <form id="call-form">
+              <label for="mission">Mission</label>
+              <select id="mission" required></select>
+              <p id="mission-description" class="field-hint"></p>
+
               <label for="destination">Number to call</label>
               <input id="destination" class="phone-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 555 555 0100" required />
               <div class="caller-line">
                 <span>Calling from</span>
                 <strong id="caller-number">—</strong>
               </div>
+
+              <label for="context">Background for this call</label>
+              <textarea id="context" rows="6" placeholder="Anything Vance should know, in normal words. Leave blank to use the saved context file for this mission."></textarea>
 
               <div class="primary-actions">
                 <button id="call-button" class="button button-red" type="submit">
@@ -95,6 +102,15 @@
               <div><dt>Call ID</dt><dd id="call-id">—</dd></div>
               <div><dt>Outcome</dt><dd id="outcome">In progress</dd></div>
             </dl>
+
+            <form id="steer-form" class="steer-row">
+              <label for="steer-input">Steer (they will not hear this)</label>
+              <div class="steer-controls">
+                <input id="steer-input" type="text" placeholder="Ask him how subs get scheduled." disabled />
+                <button id="steer-button" class="button button-outline" type="submit" disabled>Send</button>
+              </div>
+              <p id="steer-status" class="field-hint"></p>
+            </form>
           </section>
         </div>
 

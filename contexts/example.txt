@@ -1,0 +1,34 @@
+Write whatever Vance should know for this call, in normal words. There is no
+format and no required fields. The mission says what to do; this says what you
+know and what you want.
+
+Save it as contexts/<mission-name>.txt to have it picked up automatically, or
+paste it into the dashboard for a one-off call. Contexts are gitignored because
+they usually hold something private.
+
+For a bill negotiation, that might be:
+
+  My name is YOUR NAME and I am the account holder. I authorize Vance to call
+  and make decisions for me while I listen.
+
+  My account number is X. My PIN is Y. My postal code is Z. Any other detail
+  they might ask for: ...
+
+  I currently pay $X for A, B and C. I want the best deal available. I'd take a
+  two-year term if it saves more than $15 a month, but I don't want a hardware
+  upgrade and I won't do a credit check. Don't accept anything with a setup
+  fee.
+
+For a discovery call, that might be:
+
+  You're calling Jack, who runs a mid-sized construction firm. We met briefly
+  last week; he wants project and crew management software built. He's
+  frustrated with spreadsheets and thinks his foremen won't use anything
+  complicated. Don't quote a price or a timeline — that's mine to decide.
+
+Two things that matter more than they look:
+
+- Say how to pronounce any unusual name, spelled out phonetically. Text to
+  speech will otherwise guess, and guess wrong.
+- Say what Vance must NOT agree to. That is the one instruction with real
+  consequences, and it is the one people forget to write down.

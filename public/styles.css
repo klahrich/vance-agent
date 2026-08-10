@@ -528,3 +528,45 @@ footer {
   .message { grid-template-columns: 60px 1fr; gap: 12px; }
   .message-time { display: none; }
 }
+
+/* Mission picker, per-call context, and live steering. */
+#mission,
+#context,
+#steer-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+}
+
+#context {
+  resize: vertical;
+  min-height: 6rem;
+  line-height: 1.5;
+}
+
+.field-hint {
+  margin: 0.35rem 0 0.9rem;
+  font-size: 0.85rem;
+  opacity: 0.65;
+  min-height: 1.1em;
+}
+
+.steer-row {
+  margin-top: 1.1rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.steer-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.steer-controls #steer-input { flex: 1; }
+.steer-row :disabled { opacity: 0.45; }

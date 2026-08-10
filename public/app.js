@@ -18,6 +18,13 @@ const callIdElement = document.querySelector("#call-id");
 const outcome = document.querySelector("#outcome");
 const transcript = document.querySelector("#transcript");
 const transcriptState = document.querySelector("#transcript-state");
+const missionSelect = document.querySelector("#mission");
+const missionDescription = document.querySelector("#mission-description");
+const contextInput = document.querySelector("#context");
+const steerForm = document.querySelector("#steer-form");
+const steerInput = document.querySelector("#steer-input");
+const steerButton = document.querySelector("#steer-button");
+const steerStatus = document.querySelector("#steer-status");
 const callerNumber = document.querySelector("#caller-number");
 const footerCallerNumber = document.querySelector("#footer-caller-number");
 const toast = document.querySelector("#toast");
@@ -108,11 +115,12 @@ function renderTranscript(messages = []) {
   }
   transcript.replaceChildren(...messages.map((item) => {
     const row = document.createElement("article");
-    row.className = `message ${item.role === "vance" ? "is-vance" : "is-bell"}`;
+    row.className = `message ${item.role === "vance" ? "is-vance" : "is-them"}`;
 
     const speaker = document.createElement("span");
     speaker.className = "message-speaker";
-    speaker.textContent = item.role === "vance" ? "Vance" : "Bell";
+    // The mission decides what to call the other side: "rep", "client", ...
+    speaker.textContent = item.role === "vance" ? "Vance" : state.counterpart || "Them";
 
     const text = document.createElement("div");
     text.className = "message-text";
@@ -136,10 +144,15 @@ function renderCall(call) {
       ...call,
       monitor: call.monitor ?? state.call.monitor,
       destination: call.destination ?? state.call.destination,
+      counterpart: call.counterpart ?? state.call.counterpart,
+      mission: call.mission ?? state.call.mission,
       messages: call.messages ?? state.call.messages,
     };
   }
   state.call = call;
+  state.counterpart = call?.counterpart
+    ? call.counterpart.charAt(0).toUpperCase() + call.counterpart.slice(1)
+    : "Them";
   const status = call?.status || "unknown";
   const active = Boolean(call) && !terminalStatuses.has(status);
   const hasMonitor = active && Boolean(call.monitor?.listenUrl);
@@ -151,6 +164,8 @@ function renderCall(call) {
   callButton.disabled = active;
   callButton.textContent = active ? "Call in progress" : "Start call";
   hangupButton.disabled = !active || !call.monitor?.controlUrl;
+  // Steering rides the same control channel as hang-up.
+  setSteerEnabled(active && Boolean(call.monitor?.controlUrl));
   listenButton.disabled = !hasMonitor;
   activeDestination.textContent = prettyPhone(call?.destination);
   callIdElement.textContent = call?.id || "—";
@@ -360,6 +375,41 @@ function stopListening() {
     : "Available once the call connects";
 }
 
+function renderMissions(missions) {
+  state.missions = missions;
+  missionSelect.innerHTML = "";
+  if (!missions.length) {
+    missionSelect.append(new Option("No missions found", ""));
+    missionSelect.disabled = true;
+    return;
+  }
+  for (const mission of missions) {
+    // A mission whose frontmatter is broken stays visible but unselectable —
+    // silently hiding it would look like the file was never saved.
+    const option = new Option(
+      mission.error ? `${mission.name} — unreadable` : mission.name,
+      mission.name,
+    );
+    option.disabled = Boolean(mission.error);
+    missionSelect.append(option);
+  }
+  missionSelect.disabled = false;
+  const saved = localStorage.getItem("vance.mission");
+  if (saved && missions.some((m) => m.name === saved && !m.error)) missionSelect.value = saved;
+  describeMission();
+}
+
+function describeMission() {
+  const mission = (state.missions || []).find((m) => m.name === missionSelect.value);
+  missionDescription.textContent = mission ? mission.error || mission.description : "";
+}
+
+function setSteerEnabled(enabled) {
+  steerInput.disabled = !enabled;
+  steerButton.disabled = !enabled;
+  if (!enabled) steerStatus.textContent = "";
+}
+
 async function unlock(key) {
   state.key = key;
   const config = await api("/api/session");
@@ -369,6 +419,7 @@ async function unlock(key) {
   callerNumber.textContent = prettyPhone(config.callerNumber);
   footerCallerNumber.textContent = prettyPhone(config.callerNumber);
   if (config.defaultDestination) destinationInput.value ||= prettyPhone(config.defaultDestination);
+  renderMissions(config.missions || []);
 
   const savedCallId = localStorage.getItem("vance.active.call");
   if (savedCallId) {
@@ -406,8 +457,13 @@ callForm.addEventListener("submit", async (event) => {
   try {
     const call = await api("/api/calls", {
       method: "POST",
-      body: JSON.stringify({ destination: destinationInput.value }),
+      body: JSON.stringify({
+        destination: destinationInput.value,
+        mission: missionSelect.value,
+        context: contextInput.value,
+      }),
     });
+    localStorage.setItem("vance.mission", missionSelect.value);
     renderCall(call);
     startLiveFeed(call.id);
     startPolling();
@@ -415,6 +471,28 @@ callForm.addEventListener("submit", async (event) => {
     showToast(error.message);
     callButton.disabled = false;
     callButton.textContent = "Start call";
+  }
+});
+
+missionSelect.addEventListener("change", describeMission);
+
+steerForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const instruction = steerInput.value.trim();
+  if (!instruction || !state.call?.id) return;
+  steerButton.disabled = true;
+  steerStatus.textContent = "Sending…";
+  try {
+    await api(`/api/calls/${state.call.id}/steer`, {
+      method: "POST",
+      body: JSON.stringify({ instruction }),
+    });
+    steerInput.value = "";
+    steerStatus.textContent = "Sent — Vance will pick it up on the next turn.";
+  } catch (error) {
+    steerStatus.textContent = error.message;
+  } finally {
+    steerButton.disabled = false;
   }
 });
 

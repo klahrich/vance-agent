@@ -2,10 +2,18 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { loadProfileText } from "./config.js";
-import { completeWithPi, openAiCompletion, openAiSse } from "./pi-llm.js";
+import { loadContextText } from "./config.js";
+import { isMissionName, listMissions, loadMission } from "./missions/loader.js";
+import { SseChunkWriter, completeWithPi, openAiCompletion } from "./pi-llm.js";
 import type { OpenAiChatRequest, PiCompletion } from "./types.js";
-import { createVapiCall, endVapiCall, getVapiCall, type VapiCall, type VapiCallMessage } from "./vapi-api.js";
+import {
+  createVapiCall,
+  endVapiCall,
+  getVapiCall,
+  steerVapiCall,
+  type VapiCall,
+  type VapiCallMessage,
+} from "./vapi-api.js";
 
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
@@ -43,7 +51,7 @@ function dashboardAuthorized(req: IncomingMessage): boolean {
 }
 
 interface DashboardMessage {
-  role: "vance" | "bell";
+  role: "vance" | "them";
   message: string;
   secondsFromStart?: number;
   partial?: boolean;
@@ -65,7 +73,7 @@ function normalizeMessages(entries: VapiCallMessage[]): DashboardMessage[] {
     const message = entry.message ?? entry.content;
     if (!message || !role || !["user", "customer", "assistant", "bot"].includes(role)) return [];
     return [{
-      role: role === "assistant" || role === "bot" ? "vance" as const : "bell" as const,
+      role: role === "assistant" || role === "bot" ? "vance" as const : "them" as const,
       message,
       secondsFromStart: entry.secondsFromStart ?? entry.time,
     }];
@@ -98,6 +106,8 @@ function dashboardCall(call: VapiCall): unknown {
     startedAt: call.startedAt,
     endedAt: call.endedAt,
     destination: call.customer?.number,
+    mission: call.metadata?.mission,
+    counterpart: call.metadata?.counterpart,
     monitor: call.monitor,
     messages,
     transcript: call.artifact?.transcript,
@@ -161,7 +171,7 @@ function handleVapiEvent(payload: any): void {
   }
 
   if (message.type === "transcript" || String(message.type).startsWith("transcript[")) {
-    const role = message.role === "assistant" || message.role === "bot" ? "vance" : "bell";
+    const role = message.role === "assistant" || message.role === "bot" ? "vance" : "them";
     const next: DashboardMessage = {
       role,
       message: message.transcript ?? message.originalTranscript ?? "",
@@ -272,20 +282,29 @@ const server = createServer(async (req, res) => {
       return json(res, 200, {
         ok: true,
         callerNumber: process.env.VANCE_CALLER_NUMBER ?? "",
-        defaultDestination: process.env.BELL_PHONE_NUMBER ?? "",
+        defaultDestination: process.env.DEFAULT_DESTINATION ?? "",
+        missions: await listMissions(),
       });
     }
 
     if (pathname === "/api/calls" && req.method === "POST") {
       if (!dashboardAuthorized(req)) return json(res, 401, { error: "That passcode did not work." });
-      const body = await readBody(req) as { destination?: unknown };
-      const profileText = process.env.VANCE_PROFILE_TEXT ?? await loadProfileText("my-bell-account");
-      const call = await createVapiCall(normalizePhoneNumber(body.destination), profileText);
+      const body = await readBody(req) as { destination?: unknown; mission?: unknown; context?: unknown };
+      if (!isMissionName(body.mission)) return json(res, 400, { error: "Pick a mission." });
+      const mission = await loadMission(body.mission);
+      // Typed into the dashboard for this call; otherwise a file named after
+      // the mission, so a standing context (an account, a client) does not
+      // have to be re-pasted every time.
+      const contextText =
+        typeof body.context === "string" && body.context.trim()
+          ? body.context
+          : await loadContextText(mission.name).catch(() => process.env.VANCE_CONTEXT_TEXT ?? "");
+      const call = await createVapiCall(mission, normalizePhoneNumber(body.destination), contextText);
       liveTranscript(call.id);
       return json(res, 201, dashboardCall(call));
     }
 
-    const callRoute = pathname.match(/^\/api\/calls\/([0-9a-f-]+)(\/(?:hangup|live))?$/i);
+    const callRoute = pathname.match(/^\/api\/calls\/([0-9a-f-]+)(\/(?:hangup|live|steer))?$/i);
     if (callRoute) {
       if (!dashboardAuthorized(req)) return json(res, 401, { error: "That passcode did not work." });
       const callId = callRoute[1];
@@ -303,6 +322,15 @@ const server = createServer(async (req, res) => {
         await endVapiCall(call);
         return json(res, 202, { ok: true, status: "ending" });
       }
+      if (req.method === "POST" && callRoute[2] === "/steer") {
+        const body = await readBody(req) as { instruction?: unknown };
+        const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
+        if (!instruction) return json(res, 400, { error: "Write an instruction first." });
+        const call = await getVapiCall(callId);
+        if (call.status === "ended") return json(res, 409, { error: "That call has already ended." });
+        await steerVapiCall(call, instruction);
+        return json(res, 202, { ok: true });
+      }
     }
 
     if (req.method === "POST" && pathname === "/v1/chat/completions") {
@@ -310,18 +338,37 @@ const server = createServer(async (req, res) => {
       if (!serverKey || !bearerMatches(req, serverKey)) return json(res, 401, { error: { message: "Unauthorized" } });
       const request = await readBody(req) as OpenAiChatRequest;
       captureLlmConversation(request);
-      const completion = await completeWithPi(request);
-      captureLlmConversation(request, completion);
-      if (request.stream) {
-        res.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
-        });
-        res.end(openAiSse(completion));
-        return;
+
+      if (!request.stream) {
+        const completion = await completeWithPi(request);
+        captureLlmConversation(request, completion);
+        return json(res, 200, openAiCompletion(completion));
       }
-      return json(res, 200, openAiCompletion(completion));
+
+      // Forward text the instant the model produces it. Vapi cannot begin
+      // synthesising until a chunk arrives, so buffering the whole reply adds
+      // its entire generation time to the silence the other person hears
+      // after they stop talking.
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      });
+      const writer = new SseChunkWriter((line) => res.write(line), request.model ?? "vance-pi");
+      try {
+        const completion = await completeWithPi(request, (delta) => writer.text(delta));
+        captureLlmConversation(request, completion);
+        writer.close(completion.toolCalls);
+      } catch (error) {
+        // The response is already open with a 200, so there is no status code
+        // left to fail with. Close the stream cleanly and let Vapi carry on —
+        // a silent turn is recoverable, a hung socket is not.
+        console.error("stream failed:", error);
+        writer.close([]);
+      }
+      res.end();
+      return;
     }
 
     if (req.method === "POST" && pathname === "/vapi/events") {

@@ -4,8 +4,8 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import type { TSchema } from "typebox";
 import type { OpenAiChatRequest, OpenAiMessage, PiCompletion } from "./types.js";
 
-const PI_MODEL = process.env.PI_MODEL ?? "gpt-5.6-terra";
-const PI_THINKING_LEVEL = process.env.PI_THINKING_LEVEL ?? "medium";
+const PI_MODEL = process.env.PI_MODEL ?? "gpt-5.5";
+const PI_THINKING_LEVEL = process.env.PI_THINKING_LEVEL ?? "low";
 const PI_SERVICE_TIER = process.env.PI_SERVICE_TIER ?? "priority";
 
 function renderMessage(message: OpenAiMessage): string {
@@ -32,7 +32,26 @@ function createForwardedTools(request: OpenAiChatRequest): AgentTool[] {
   }));
 }
 
-export async function completeWithPi(request: OpenAiChatRequest): Promise<PiCompletion> {
+/** Called with each text fragment as the model produces it. */
+export type DeltaSink = (delta: string) => void;
+
+/**
+ * One turn of reasoning, stateless.
+ *
+ * Vapi owns the conversation: it hands us the whole transcript every turn and
+ * we build a fresh agent from it. Nothing is persisted here, which is what
+ * lets the service restart mid-call without anyone noticing, and what keeps a
+ * database out of the audio latency path.
+ *
+ * `onDelta` receives text as it is generated so the caller can forward it
+ * straight to Vapi. Emitting incrementally is not an optimisation: until the
+ * first token reaches Vapi, no audio can start, and that dead air is most of
+ * the gap the other person hears after they stop speaking.
+ */
+export async function completeWithPi(
+  request: OpenAiChatRequest,
+  onDelta?: DeltaSink,
+): Promise<PiCompletion> {
   const messages = request.messages ?? [];
   const systemPrompt = messages
     .filter((message) => message.role === "system")
@@ -71,6 +90,14 @@ export async function completeWithPi(request: OpenAiChatRequest): Promise<PiComp
       terminate: true,
     }),
   });
+
+  if (onDelta) {
+    agent.subscribe((event) => {
+      if (event.type !== "message_update") return;
+      const update = event.assistantMessageEvent;
+      if (update.type === "text_delta" && update.delta) onDelta(update.delta);
+    });
+  }
 
   await agent.prompt([
     "Here is the complete call transcript supplied by Vapi. Continue from the final turn.",
@@ -122,18 +149,43 @@ export function openAiCompletion(completion: PiCompletion): Record<string, unkno
   };
 }
 
-export function openAiSse(completion: PiCompletion): string {
-  const base = { id: completion.id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: completion.model };
-  const chunks: Record<string, unknown>[] = [
-    { ...base, choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }] },
-  ];
-  if (completion.text) {
-    chunks.push({ ...base, choices: [{ index: 0, delta: { content: completion.text }, finish_reason: null }] });
+/** Incremental SSE writer for the OpenAI chat-completions chunk format. */
+export class SseChunkWriter {
+  private readonly base: { id: string; object: string; created: number; model: string };
+  private opened = false;
+
+  constructor(
+    private readonly write: (line: string) => void,
+    model: string,
+    id = `chatcmpl-${crypto.randomUUID()}`,
+  ) {
+    this.base = { id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model };
   }
-  completion.toolCalls.forEach((call, index) => {
-    chunks.push({
-      ...base,
-      choices: [{
+
+  private emit(choice: Record<string, unknown>): void {
+    this.write(`data: ${JSON.stringify({ ...this.base, choices: [choice] })}\n\n`);
+  }
+
+  /** Vapi will not start synthesising until it sees a chunk, so open the
+   *  stream before the model has produced anything. */
+  open(): void {
+    if (this.opened) return;
+    this.opened = true;
+    this.emit({ index: 0, delta: { role: "assistant" }, finish_reason: null });
+  }
+
+  text(delta: string): void {
+    this.open();
+    this.emit({ index: 0, delta: { content: delta }, finish_reason: null });
+  }
+
+  /** Tool calls are only known once the turn completes: `beforeToolCall`
+   *  blocks execution so Vapi can run them, which means they surface at the
+   *  end rather than streaming. */
+  close(toolCalls: PiCompletion["toolCalls"]): void {
+    this.open();
+    toolCalls.forEach((call, index) => {
+      this.emit({
         index: 0,
         delta: {
           tool_calls: [{
@@ -144,12 +196,9 @@ export function openAiSse(completion: PiCompletion): string {
           }],
         },
         finish_reason: null,
-      }],
+      });
     });
-  });
-  chunks.push({
-    ...base,
-    choices: [{ index: 0, delta: {}, finish_reason: completion.toolCalls.length ? "tool_calls" : "stop" }],
-  });
-  return `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`;
+    this.emit({ index: 0, delta: {}, finish_reason: toolCalls.length ? "tool_calls" : "stop" });
+    this.write("data: [DONE]\n\n");
+  }
 }

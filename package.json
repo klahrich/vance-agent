@@ -1,8 +1,8 @@
 {
-  "name": "vance-loyalty-agent",
+  "name": "vance-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "An autonomous Pi + Vapi voice agent that negotiates telecom bills.",
+  "description": "A voice agent that runs phone calls from mission files.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lhqezio/vance-agent.git"
@@ -18,20 +18,20 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node --import tsx src/server.ts",
-    "setup:vapi": "node --import tsx src/cli/setup-vapi.ts",
     "call": "node --import tsx src/cli/start-call.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "setup:credential": "node --import tsx src/cli/setup-credential.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.1",
     "@earendil-works/pi-ai": "0.84.1",
     "dotenv": "^17.2.3",
+    "tsx": "^4.20.6",
     "typebox": "1.3.7"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
-    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"
   }
