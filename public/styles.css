@@ -570,3 +570,42 @@ footer {
 
 .steer-controls #steer-input { flex: 1; }
 .steer-row :disabled { opacity: 0.45; }
+
+/* Structured outcome, produced after the call ends. */
+.outcome-panel {
+  margin-top: 1.1rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.outcome-panel .panel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.outcome-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.outcome-summary {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+.outcome-data {
+  margin: 0;
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.8rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre;
+}

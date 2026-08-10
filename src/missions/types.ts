@@ -22,9 +22,12 @@ export interface Mission {
   maxMinutes: number;
   /** Overrides VAPI_VOICE_ID for this mission. */
   voice?: string;
-  /** Path (relative to the mission file) of a JSON Schema for structured
-   *  extraction at end of call. Wired in phase 2. */
+  /** Filename (in missions/) of a JSON Schema describing what to extract
+   *  from the call. For an elicitation mission this schema, not the
+   *  transcript, is the deliverable. */
   outcome?: string;
+  /** The parsed contents of `outcome`, loaded with the mission. */
+  outcomeSchema?: Record<string, unknown>;
   /** The prose half: goal, conduct, boundaries. Goes into the system prompt
    *  verbatim, after CORE. */
   body: string;

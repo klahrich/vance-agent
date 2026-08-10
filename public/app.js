@@ -25,6 +25,10 @@ const steerForm = document.querySelector("#steer-form");
 const steerInput = document.querySelector("#steer-input");
 const steerButton = document.querySelector("#steer-button");
 const steerStatus = document.querySelector("#steer-status");
+const outcomePanel = document.querySelector("#outcome-panel");
+const outcomeSummary = document.querySelector("#outcome-summary");
+const outcomeData = document.querySelector("#outcome-data");
+const copyOutcome = document.querySelector("#copy-outcome");
 const callerNumber = document.querySelector("#caller-number");
 const footerCallerNumber = document.querySelector("#footer-caller-number");
 const toast = document.querySelector("#toast");
@@ -147,6 +151,7 @@ function renderCall(call) {
       counterpart: call.counterpart ?? state.call.counterpart,
       mission: call.mission ?? state.call.mission,
       messages: call.messages ?? state.call.messages,
+      analysis: call.analysis ?? state.call.analysis,
     };
   }
   state.call = call;
@@ -173,14 +178,26 @@ function renderCall(call) {
   listenCaption.textContent = hasMonitor ? "Hear both sides without joining" : active ? "Monitor is getting ready" : "Available once the call connects";
   transcriptState.textContent = active ? "Updating live" : call ? "Final conversation" : "Waiting for a call";
   renderTranscript(call?.messages || []);
+  renderOutcome(call?.analysis);
   durationElement.textContent = elapsedLabel(getElapsed(call));
 
   if (call?.id) localStorage.setItem("vance.active.call", call.id);
   if (!active) {
-    stopPolling();
     stopLiveFeed();
     stopListening();
-    if (call) localStorage.removeItem("vance.active.call");
+    // Vapi runs extraction after the call ends, so hanging up is not the end
+    // of the story on a mission with an outcome. Keep polling briefly, or the
+    // deliverable never reaches the screen.
+    const awaitingOutcome =
+      call && !call.analysis && Date.now() - (state.endedAt ??= Date.now()) < 90_000;
+    if (awaitingOutcome) {
+      state.pollTimer = window.setTimeout(pollCall, 3000);
+    } else {
+      stopPolling();
+      if (call) localStorage.removeItem("vance.active.call");
+    }
+  } else {
+    state.endedAt = null;
   }
 }
 
@@ -404,6 +421,21 @@ function describeMission() {
   missionDescription.textContent = mission ? mission.error || mission.description : "";
 }
 
+function renderOutcome(analysis) {
+  const data = analysis?.structuredData;
+  const summary = analysis?.summary;
+  if (!data && !summary) {
+    outcomePanel.hidden = true;
+    return;
+  }
+  outcomePanel.hidden = false;
+  outcomeSummary.textContent = summary || "";
+  outcomeSummary.hidden = !summary;
+  outcomeData.textContent = data ? JSON.stringify(data, null, 2) : "";
+  outcomeData.hidden = !data;
+  state.outcomeJson = data ? JSON.stringify(data, null, 2) : "";
+}
+
 function setSteerEnabled(enabled) {
   steerInput.disabled = !enabled;
   steerButton.disabled = !enabled;
@@ -475,6 +507,13 @@ callForm.addEventListener("submit", async (event) => {
 });
 
 missionSelect.addEventListener("change", describeMission);
+
+copyOutcome.addEventListener("click", async () => {
+  if (!state.outcomeJson) return;
+  await navigator.clipboard.writeText(state.outcomeJson);
+  copyOutcome.textContent = "Copied";
+  window.setTimeout(() => (copyOutcome.textContent = "Copy JSON"), 1500);
+});
 
 steerForm.addEventListener("submit", async (event) => {
   event.preventDefault();

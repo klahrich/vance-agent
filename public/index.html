@@ -103,6 +103,15 @@
               <div><dt>Outcome</dt><dd id="outcome">In progress</dd></div>
             </dl>
 
+            <section id="outcome-panel" class="outcome-panel" hidden>
+              <div class="panel-heading">
+                <h3>What the call produced</h3>
+                <button id="copy-outcome" class="text-button" type="button">Copy JSON</button>
+              </div>
+              <p id="outcome-summary" class="outcome-summary"></p>
+              <pre id="outcome-data" class="outcome-data"></pre>
+            </section>
+
             <form id="steer-form" class="steer-row">
               <label for="steer-input">Steer (they will not hear this)</label>
               <div class="steer-controls">

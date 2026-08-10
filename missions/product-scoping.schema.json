@@ -1,0 +1,96 @@
+{
+  "type": "object",
+  "description": "What was learned on a product-scoping call. Every field is optional on purpose: an absent field means the call did not cover it, which is information. Never infer a value that was not said.",
+  "properties": {
+    "business": {
+      "type": "object",
+      "description": "How the company actually operates today.",
+      "properties": {
+        "what_they_do": { "type": "string" },
+        "size": { "type": "string", "description": "Headcount, crews, or however they described their scale, in their terms." },
+        "concurrent_projects": { "type": "string", "description": "How many jobs run at once, as stated. Keep their exact number or range." },
+        "project_shape": { "type": "string", "description": "Typical duration, value, and how a job progresses from won to finished." },
+        "who_they_work_with": { "type": "string", "description": "Subcontractors, employees, engineers, architects, clients — and which of those they need visibility into." }
+      }
+    },
+    "today": {
+      "type": "object",
+      "description": "The current way of working. Mechanics, not summaries — this is the baseline any new tool has to beat.",
+      "properties": {
+        "tools_in_use": { "type": "array", "items": { "type": "string" }, "description": "Spreadsheets, paper, whiteboard, WhatsApp, accounting software, anything named." },
+        "how_status_is_tracked": { "type": "string", "description": "How they find out where a project stands right now." },
+        "how_hours_are_captured": { "type": "string" },
+        "what_breaks": { "type": "array", "items": { "type": "string" }, "description": "Specific failures they described, ideally with the story attached." },
+        "cost_of_the_problem": { "type": "string", "description": "Money, time, or lost work they attributed to the current way. Only if quantified or clearly implied." },
+        "previously_tried": { "type": "string", "description": "Tools or processes attempted before and abandoned, and why. Absence of an answer here is itself worth knowing." }
+      }
+    },
+    "users": {
+      "type": "array",
+      "description": "Every distinct kind of person who would touch the system. Field users matter most: a tool the office likes and the crews refuse to open has failed.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": { "type": "string" },
+          "what_they_need": { "type": "string" },
+          "tech_comfort": { "type": "string", "description": "How they described this person's relationship with technology." },
+          "device": { "type": "string", "description": "Phone, tablet, desktop, or nothing." },
+          "adoption_risk": { "type": "string", "description": "Any reason given to think this group would resist using it." }
+        }
+      }
+    },
+    "needs": {
+      "type": "array",
+      "description": "Capabilities discussed, each ranked as the client ranked it — not as the agent judged it.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "capability": { "type": "string" },
+          "why": { "type": "string", "description": "The underlying problem it solves, in their words." },
+          "priority": { "type": "string", "enum": ["must-have", "important", "nice-to-have", "unclear"] },
+          "evidence": { "type": "string", "description": "The concrete situation they described that makes this real." }
+        }
+      }
+    },
+    "profitability": {
+      "type": "object",
+      "description": "Called out separately because it was the stated reason for the project.",
+      "properties": {
+        "can_they_answer_it_today": { "type": "string" },
+        "what_they_would_need": { "type": "string", "description": "The inputs required to know whether a job is profitable." },
+        "where_the_numbers_live": { "type": "string", "description": "Accounting system, spreadsheets, someone's head." },
+        "definition_of_profitable": { "type": "string", "description": "How they actually calculate it, if they said." }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "offline_required": { "type": "string", "description": "Whether sites have connectivity, and what must work without it." },
+        "integrations": { "type": "array", "items": { "type": "string" }, "description": "Systems this must exchange data with — accounting, payroll, anything named." },
+        "languages": { "type": "string" },
+        "compliance_or_reporting": { "type": "string", "description": "Anything they are obliged to produce for clients, engineers, or regulators." },
+        "existing_data": { "type": "string", "description": "What would have to be migrated in." }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "properties": {
+        "who_decides": { "type": "string", "description": "Anyone besides the person on the call who has a say." },
+        "timeline_pressure": { "type": "string", "description": "Any date driving this, and what makes it a date." },
+        "budget_signal": { "type": "string", "description": "Only what they volunteered. The agent must not have raised price." },
+        "what_success_looks_like": { "type": "string", "description": "How they would judge, in a year, that this was worth doing." }
+      }
+    },
+    "call_quality": {
+      "type": "object",
+      "description": "How much to trust the rest of this record.",
+      "properties": {
+        "topics_not_covered": { "type": "array", "items": { "type": "string" }, "description": "Agenda items the call never reached." },
+        "unresolved_questions": { "type": "array", "items": { "type": "string" }, "description": "Things asked but not really answered, or answered vaguely." },
+        "client_energy": { "type": "string", "description": "Engaged, rushed, distracted, sceptical — anything that colours the answers." },
+        "follow_ups": { "type": "array", "items": { "type": "string" }, "description": "Anything the client said they would send or check." },
+        "notable_quotes": { "type": "array", "items": { "type": "string" }, "description": "Their own words where the phrasing carries meaning a paraphrase would lose." }
+      }
+    }
+  }
+}

@@ -61,6 +61,10 @@ interface LiveTranscript {
   messages: DashboardMessage[];
   partial?: DashboardMessage;
   assistantDraft?: DashboardMessage & { turn?: number };
+  /** Extraction arrives once, on end-of-call-report, and is what the call was
+   *  for on an elicitation mission. Held here so the dashboard can show it
+   *  without re-fetching, and logged so it survives this process. */
+  analysis?: { summary?: string; structuredData?: Record<string, unknown> };
   updatedAt: number;
 }
 
@@ -112,6 +116,10 @@ function dashboardCall(call: VapiCall): unknown {
     messages,
     transcript: call.artifact?.transcript,
     recordingUrl: call.artifact?.stereoRecordingUrl ?? call.artifact?.recordingUrl,
+    // Vapi runs extraction after the call ends, so this arrives on the
+    // webhook slightly before a polled GET reflects it — prefer whichever we
+    // already have.
+    analysis: liveTranscripts.get(call.id)?.analysis ?? call.analysis,
   };
 }
 
@@ -199,10 +207,20 @@ function handleVapiEvent(payload: any): void {
     };
   }
 
-  if (message.type === "end-of-call-report" && Array.isArray(message.artifact?.messages)) {
-    live.messages = normalizeMessages(message.artifact.messages);
-    live.partial = undefined;
-    live.assistantDraft = undefined;
+  if (message.type === "end-of-call-report") {
+    if (Array.isArray(message.artifact?.messages)) {
+      live.messages = normalizeMessages(message.artifact.messages);
+      live.partial = undefined;
+      live.assistantDraft = undefined;
+    }
+    const analysis = message.analysis ?? call?.analysis;
+    if (analysis?.structuredData || analysis?.summary) {
+      live.analysis = { summary: analysis.summary, structuredData: analysis.structuredData };
+      // Logged in full because this is the deliverable. The in-memory copy is
+      // dropped ten minutes after the call, and Vapi's own retention is the
+      // only other place it lives until persistence exists.
+      console.log(JSON.stringify({ event: "outcome", callId, analysis: live.analysis }));
+    }
   }
 
   live.updatedAt = Date.now();

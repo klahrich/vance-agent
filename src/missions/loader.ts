@@ -84,6 +84,28 @@ export async function loadMission(name: string): Promise<Mission> {
     throw new Error(`mission ${name}: maxMinutes must be between 1 and 240`);
   }
 
+  const outcome = typeof fields.outcome === "string" ? fields.outcome : undefined;
+  let outcomeSchema: Record<string, unknown> | undefined;
+  if (outcome) {
+    if (!/^[a-zA-Z0-9._-]+\.json$/.test(outcome)) {
+      throw new Error(`mission ${name}: outcome must be a .json filename in missions/`);
+    }
+    let raw: string;
+    try {
+      raw = await readFile(resolve(MISSION_DIR(), outcome), "utf8");
+    } catch {
+      throw new Error(`mission ${name}: outcome schema not found: ${outcome}`);
+    }
+    try {
+      outcomeSchema = JSON.parse(raw) as Record<string, unknown>;
+    } catch (error) {
+      throw new Error(`mission ${name}: outcome schema is not valid JSON — ${(error as Error).message}`);
+    }
+    if (outcomeSchema.type !== "object" || typeof outcomeSchema.properties !== "object") {
+      throw new Error(`mission ${name}: outcome schema must be an object schema with properties`);
+    }
+  }
+
   return {
     name,
     description: str(fields, "description"),
@@ -94,7 +116,8 @@ export async function loadMission(name: string): Promise<Mission> {
     tools,
     maxMinutes,
     voice: typeof fields.voice === "string" ? fields.voice : undefined,
-    outcome: typeof fields.outcome === "string" ? fields.outcome : undefined,
+    outcome,
+    outcomeSchema,
     body,
   };
 }

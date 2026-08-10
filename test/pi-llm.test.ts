@@ -67,6 +67,23 @@ describe("missions", () => {
     expect(mission.body).not.toContain("conduct:");
   });
 
+  it("loads and validates an outcome schema alongside the mission", async () => {
+    const mission = await loadMission("product-scoping");
+    expect(mission.outcome).toBe("product-scoping.schema.json");
+    expect(mission.outcomeSchema?.type).toBe("object");
+    const props = mission.outcomeSchema?.properties as Record<string, unknown>;
+    expect(Object.keys(props)).toContain("profitability");
+    // Nothing may be required: a field the call never reached must come back
+    // absent rather than invented.
+    expect(mission.outcomeSchema?.required).toBeUndefined();
+  });
+
+  it("keeps price and timeline out of bounds for the scoping call", async () => {
+    const mission = await loadMission("product-scoping");
+    expect(mission.body).toMatch(/must not quote a price/i);
+    expect(mission.conduct).toBe("listening");
+  });
+
   it("refuses names that could escape the missions directory", async () => {
     await expect(loadMission("../../etc/passwd")).rejects.toThrow(/invalid mission name/);
   });

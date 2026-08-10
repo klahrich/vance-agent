@@ -40,6 +40,10 @@ export interface VapiCall {
     controlUrl?: string;
   };
   messages?: VapiCallMessage[];
+  analysis?: {
+    summary?: string;
+    structuredData?: Record<string, unknown>;
+  };
   artifact?: {
     messages?: VapiCallMessage[];
     transcript?: string;
@@ -92,6 +96,27 @@ export function buildAssistant(mission: Mission, contextText: string): Record<st
         ? { credentialId: process.env.VAPI_WEBHOOK_CREDENTIAL_ID }
         : {}),
     },
+    ...(mission.outcomeSchema
+      ? {
+          analysisPlan: {
+            structuredDataSchema: mission.outcomeSchema,
+            structuredDataPrompt: [
+              `You are reading the transcript of a call whose purpose was: ${mission.description}.`,
+              "Extract what was actually said into the given schema.",
+              "",
+              "Record only what the other person stated or clearly implied. If a",
+              "field was never discussed, omit it or use null — do not infer it,",
+              "do not fill it with something plausible, and do not carry over an",
+              "assumption from the agent's own questions. A missing field is a",
+              "useful signal that the call did not cover it; an invented one is",
+              "worse than nothing, because it will be acted on.",
+              "",
+              "Quote or closely paraphrase their own words where the schema asks",
+              "for description rather than a category.",
+            ].join("\n"),
+          },
+        }
+      : {}),
     serverMessages: [
       "status-update",
       "end-of-call-report",
