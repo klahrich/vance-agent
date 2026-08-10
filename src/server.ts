@@ -3,6 +3,9 @@ import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { hasContext, loadContextText } from "./config.js";
+import { persistenceEnabled } from "./db/index.js";
+import { startReconciler } from "./reconcile.js";
+import { createBrief, recordCallStarted, saveArtifacts, updateCallProgress } from "./store.js";
 import { isMissionName, listMissions, loadMission } from "./missions/loader.js";
 import { SseChunkWriter, completeWithPi, openAiCompletion } from "./pi-llm.js";
 import type { OpenAiChatRequest, PiCompletion } from "./types.js";
@@ -167,6 +170,39 @@ function acceptLiveSubscriber(callId: string, req: IncomingMessage, res: ServerR
   });
 }
 
+/** Fire-and-forget write of everything a finished call produced. The
+ *  reconciler will do this again from Vapi regardless, so a failure here is a
+ *  delay rather than a loss — which is exactly why it is allowed to be async
+ *  and unawaited on the webhook path. */
+async function persist(
+  callId: string,
+  call: VapiCall | undefined,
+  live: LiveTranscript,
+  analysis: { summary?: string; structuredData?: Record<string, unknown> } | undefined,
+): Promise<void> {
+  try {
+    await updateCallProgress(callId, {
+      status: call?.status ?? "ended",
+      endedReason: call?.endedReason,
+      startedAt: call?.startedAt ?? null,
+      endedAt: call?.endedAt ?? null,
+      cost: typeof (call as { cost?: number } | undefined)?.cost === "number"
+        ? (call as { cost?: number }).cost!
+        : null,
+    });
+    await saveArtifacts(callId, {
+      // Our own copy of the conversation, not Vapi's transcription of our
+      // audio. See the transcript handling above.
+      transcript: live.messages.length ? live.messages : undefined,
+      summary: analysis?.summary,
+      structuredData: analysis?.structuredData,
+      recordingUrl: call?.artifact?.stereoRecordingUrl ?? call?.artifact?.recordingUrl,
+    });
+  } catch (error) {
+    console.warn("[store] persist failed:", (error as Error).message);
+  }
+}
+
 function handleVapiEvent(payload: any): void {
   const message = payload?.message;
   const call = message?.call as VapiCall | undefined;
@@ -230,11 +266,20 @@ function handleVapiEvent(payload: any): void {
     const analysis = message.analysis ?? call?.analysis;
     if (analysis?.structuredData || analysis?.summary) {
       live.analysis = { summary: analysis.summary, structuredData: analysis.structuredData };
-      // Logged in full because this is the deliverable. The in-memory copy is
-      // dropped ten minutes after the call, and Vapi's own retention is the
-      // only other place it lives until persistence exists.
+      // Still logged in full even with a database behind us: this is the
+      // deliverable, and a log line costs nothing next to losing it.
       console.log(JSON.stringify({ event: "outcome", callId, analysis: live.analysis }));
     }
+    void persist(callId, call, live, analysis);
+  }
+
+  if (message.type === "status-update") {
+    void updateCallProgress(callId, {
+      status: message.status,
+      endedReason: message.endedReason,
+      startedAt: call?.startedAt ?? null,
+      endedAt: call?.endedAt ?? null,
+    }).catch((error) => console.warn("[store] status update failed:", (error as Error).message));
   }
 
   live.updatedAt = Date.now();
@@ -336,7 +381,32 @@ const server = createServer(async (req, res) => {
         typeof body.context === "string" && body.context.trim()
           ? body.context
           : await loadContextText(mission.name).catch(() => process.env.VANCE_CONTEXT_TEXT ?? "");
-      const call = await createVapiCall(mission, normalizePhoneNumber(body.destination), contextText);
+      const destination = normalizePhoneNumber(body.destination);
+
+      // Write-ahead: the intent to call is recorded before the phone rings.
+      // If anything after this point dies, we still know a call was attempted
+      // and why. Persistence failures must not block the call itself — a
+      // database being down is not a reason to be unable to phone someone.
+      const briefId = await createBrief({
+        mission,
+        destination,
+        context: contextText,
+        sourceChannel: "web",
+        identity: { channel: "web", channelUserId: "operator", displayName: "Operator" },
+      }).catch((error) => {
+        console.warn("[store] createBrief failed:", (error as Error).message);
+        return null;
+      });
+
+      const call = await createVapiCall(mission, destination, contextText);
+      await recordCallStarted({
+        briefId,
+        vapiCallId: call.id,
+        mission: mission.name,
+        destination,
+        status: call.status,
+      }).catch((error) => console.warn("[store] recordCallStarted failed:", (error as Error).message));
+
       liveTranscript(call.id);
       return json(res, 201, dashboardCall(call));
     }
@@ -435,4 +505,10 @@ const server = createServer(async (req, res) => {
 });
 
 const port = Number(process.env.PORT ?? 8787);
-server.listen(port, () => console.log(`Vance: Vapi transport -> Pi brain on port ${port}`));
+server.listen(port, () => {
+  console.log(`Vance: Vapi transport -> Pi brain on port ${port}`);
+  if (persistenceEnabled()) {
+    startReconciler();
+    console.log("Vance: persistence on, reconciler running");
+  }
+});
