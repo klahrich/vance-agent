@@ -97,11 +97,18 @@ export async function completeWithPi(
       thinkingLevel: PI_THINKING_LEVEL as "medium",
     },
     streamFn: models.streamSimple.bind(models),
-    onPayload: (payload) => ({
-      ...(payload as Record<string, unknown>),
-      service_tier: PI_SERVICE_TIER,
-      ...(PI_REASONING_EFFORT === "inherit" ? {} : { reasoning_effort: PI_REASONING_EFFORT }),
-    }),
+    onPayload: (payload) => {
+      const base = payload as Record<string, unknown>;
+      if (PI_REASONING_EFFORT === "inherit") return { ...base, service_tier: PI_SERVICE_TIER };
+      // Pi talks to the Responses API, where effort lives at `reasoning.effort`
+      // rather than the chat-completions `reasoning_effort`.
+      const reasoning = (base.reasoning ?? {}) as Record<string, unknown>;
+      return {
+        ...base,
+        service_tier: PI_SERVICE_TIER,
+        reasoning: { ...reasoning, effort: PI_REASONING_EFFORT },
+      };
+    },
     beforeToolCall: async () => ({
       block: true,
       reason: "Forward this tool call to Vapi for execution.",
