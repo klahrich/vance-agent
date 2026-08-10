@@ -8,6 +8,23 @@ const PI_MODEL = process.env.PI_MODEL ?? "gpt-5.5";
 const PI_THINKING_LEVEL = process.env.PI_THINKING_LEVEL ?? "low";
 const PI_SERVICE_TIER = process.env.PI_SERVICE_TIER ?? "priority";
 
+/**
+ * Reasoning effort, overriding whatever Pi derives from `thinkingLevel`.
+ *
+ * This is the single biggest latency lever in the system, by a wide margin.
+ * Measured on gpt-5.5 with a 2k-token prompt: `low` gives ~2.3s to first
+ * token, `none` gives ~0.59s. Every reasoning token is generated before any
+ * text exists, so it lands squarely in the silence after the other person
+ * stops speaking — and unlike text, it cannot be streamed.
+ *
+ * `none` is the default because a phone conversation is mostly reflex: ask
+ * the obvious follow-up, acknowledge, keep the thread. Raise it per
+ * deployment if a mission genuinely needs deliberation and can afford the
+ * pause. Pi's own thinkingLevel type has no "off", which is why this goes
+ * through the payload hook instead.
+ */
+const PI_REASONING_EFFORT = process.env.PI_REASONING_EFFORT ?? "none";
+
 function renderMessage(message: OpenAiMessage): string {
   if (message.role === "assistant" && message.tool_calls?.length) {
     return `ASSISTANT TOOL CALLS: ${JSON.stringify(message.tool_calls)}`;
@@ -83,6 +100,7 @@ export async function completeWithPi(
     onPayload: (payload) => ({
       ...(payload as Record<string, unknown>),
       service_tier: PI_SERVICE_TIER,
+      ...(PI_REASONING_EFFORT === "inherit" ? {} : { reasoning_effort: PI_REASONING_EFFORT }),
     }),
     beforeToolCall: async () => ({
       block: true,
