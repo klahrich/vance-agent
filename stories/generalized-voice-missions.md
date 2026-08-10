@@ -276,26 +276,42 @@ Rough numbers for a 40-minute call: ~150 turns, a ~2k-token prefix
 ~7k, average ~4.5k, call total somewhere near 700k input tokens — a
 dollar or two. **The quadratic is a cost problem and the cost is small.**
 
-What is actually felt is latency, which is *linear* in transcript length
-and dominated by two unrelated terms:
+### What was actually measured
 
-**1. We don't stream.** `openAiSse` builds the entire completion and only
-then emits SSE chunks, so Vapi cannot begin speaking until the last token
-exists. That is most of a second of dead air on every turn, from turn
-one, independent of how long the call has run. Emitting chunks as Pi
-produces them is a fixed win that never decays. **Fix this first.**
+Numbers below are against the deployed service on `gpt-5.5`, thinking
+`minimal`, warmed up first (cold requests run 2–3× slower and quietly
+poisoned an earlier round of measurements).
 
-**2. Thinking tokens.** `PI_THINKING_LEVEL=medium` on every turn, when
-most turns in a conversation are "ask the obvious follow-up" and need no
-reasoning at all. Dropping to low is likely worth more than any context
-optimisation.
+| | median first token | notes |
+|---|---|---|
+| 20-token system prompt | 2397ms | |
+| 2112-token real prompt (CORE + mission + context) | 2287ms | no worse |
+| buffered, same request | 2415ms | |
 
-**3. Then prompt caching**, which is the right lever for the growth. The
-prefix is naturally stable — system prompt, then transcript appended in
-order — so each request is the previous one plus a little. That is the
-ideal caching shape: it collapses billed cost to roughly linear and cuts
-time-to-first-token. Needs verifying against whichever model we settle
-on.
+Three conclusions, two of which contradict what this file originally
+predicted:
+
+**Prompt size does not matter.** A 2k-token prompt is no slower than a
+20-token one. Whatever the transcript costs, it is not first-token
+latency.
+
+**Streaming saves ~18ms on a median turn.** It was ranked as the single
+biggest win and it is not. Time to first token is ~2.3s and completely
+dominates; the model is doing nothing we can stream during that window.
+
+**But streaming saves ~9 seconds on a long turn.** Two of six sampled
+turns produced first token at ~1.3s and then kept generating until 10.4s
+and 10.8s. Buffered, those are ten-second silences — long enough that a
+person concludes the call has dropped and starts talking or hangs up.
+So streaming is worth keeping: not as a median improvement, as tail
+insurance against the turns that would otherwise break the call.
+
+The remaining ~2.3s is model time-to-first-token, with a wide spread
+(938ms to 4105ms observed). That variance is worse than the mean: a
+consistently slow agent is something people adapt to, an unpredictable
+one gets talked over. Levers not yet tried: a faster model tier, an
+explicitly chosen region, and prompt caching — which on this evidence
+should be pursued for cost rather than for latency.
 
 **Rejected: summarising or windowing the transcript.** It is the obvious
 fix and it is wrong here. A discovery call's whole value is that minute
