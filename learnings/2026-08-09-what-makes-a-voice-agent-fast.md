@@ -149,6 +149,31 @@ endpoint.
 
 ---
 
+## 11. The platform's post-call analysis is not a deliverable
+
+*Added 2026-08-10, after the first real 24-minute scoping call.*
+
+Vapi's `analysisPlan` extracts structured data from a call. On a
+70-second test it worked. On the 24-minute call that actually mattered,
+`analysis` came back with `summary` and `successEvaluation` and **no
+`structuredData` at all** — no error, no partial object, no warning. The
+config was correct and present on the assistant. It just did not run.
+
+The deliverable survived only because the transcript did.
+
+Two rules:
+
+**Own the extraction.** The transcript is the durable artifact; the
+structured output is a derivation of it and should be re-runnable on
+demand. Platform analysis is fine as a fast path, never as the record.
+
+**An absent field and an absent extraction look identical.** The schema
+was deliberately designed so that a missing field means "not discussed".
+That made a total extraction failure indistinguishable from a call that
+covered nothing — until you notice the whole object is gone. Anything
+that can be legitimately empty needs a separate signal for "this did not
+run".
+
 ## What this cost, for calibration
 
 - ~$0.09/min of call time, plus model tokens

@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "setup:credential": "node --import tsx src/cli/setup-credential.ts",
-    "db:migrate": "node --import tsx src/cli/migrate.ts"
+    "db:migrate": "node --import tsx src/cli/migrate.ts",
+    "extract": "node --import tsx src/cli/extract.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.1",

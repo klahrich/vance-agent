@@ -147,6 +147,17 @@ export async function saveArtifacts(
   `;
 }
 
+/** Which mission a call was placed under, so the reconciler can find its
+ *  outcome schema without carrying the mission through every call site. */
+export async function callMission(vapiCallId: string): Promise<string | null> {
+  const sql = db();
+  if (!sql) return null;
+  const [row] = await sql<{ mission: string }[]>`
+    select mission from calls where vapi_call_id = ${vapiCallId}
+  `;
+  return row?.mission ?? null;
+}
+
 export async function markReconciled(vapiCallId: string): Promise<void> {
   const sql = db();
   if (!sql) return;

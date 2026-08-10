@@ -12,8 +12,15 @@
 // upsert. One loop closes every gap at once.
 //
 // If only one piece of the persistence work survives, it should be this one.
+import { extractOutcome } from "./extract.js";
 import { getVapiCall, type VapiCall, type VapiCallMessage } from "./vapi-api.js";
-import { callsAwaitingReconciliation, markReconciled, saveArtifacts, updateCallProgress } from "./store.js";
+import {
+  callsAwaitingReconciliation,
+  callMission,
+  markReconciled,
+  saveArtifacts,
+  updateCallProgress,
+} from "./store.js";
 
 const TERMINAL = new Set(["ended", "failed"]);
 const INTERVAL_MS = Number(process.env.RECONCILE_INTERVAL_SECONDS ?? 120) * 1000;
@@ -36,8 +43,9 @@ export async function reconcileCall(vapiCallId: string): Promise<boolean> {
     cost: typeof (call as { cost?: number }).cost === "number" ? (call as { cost?: number }).cost! : null,
   });
 
+  const messages = transcriptOf(call);
   await saveArtifacts(vapiCallId, {
-    transcript: transcriptOf(call),
+    transcript: messages,
     summary: call.analysis?.summary,
     structuredData: call.analysis?.structuredData,
     recordingUrl: call.artifact?.stereoRecordingUrl ?? call.artifact?.recordingUrl,
@@ -51,6 +59,27 @@ export async function reconcileCall(vapiCallId: string): Promise<boolean> {
   const endedRecently =
     call.endedAt !== undefined && Date.now() - Date.parse(call.endedAt) < 10 * 60_000;
   if (analysisPending && endedRecently) return false;
+
+  // Vapi's own extraction is the fast path, and on a long call it can come
+  // back absent with no error at all. Since the transcript is durable, we can
+  // simply do it ourselves rather than lose the deliverable.
+  if (!call.analysis?.structuredData && messages?.length) {
+    const mission = await callMission(vapiCallId);
+    if (mission) {
+      try {
+        const structuredData = await extractOutcome(mission, messages);
+        if (structuredData) {
+          await saveArtifacts(vapiCallId, { structuredData });
+          console.log(JSON.stringify({ event: "extracted", callId: vapiCallId, mission }));
+        }
+      } catch (error) {
+        // Worth another pass rather than settling the call without its
+        // deliverable — the transcript is not going anywhere.
+        console.warn(`[reconcile] extraction for ${vapiCallId} failed:`, (error as Error).message);
+        return false;
+      }
+    }
+  }
 
   await markReconciled(vapiCallId);
   return true;
