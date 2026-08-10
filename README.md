@@ -130,6 +130,17 @@ npm test
 npm run typecheck
 ```
 
+Passing tests are not evidence that a call works. The things that have
+actually broken — a model request rejected mid-stream, a builder that
+would not build, turn-taking tuned for the wrong kind of conversation —
+were all invisible to both commands.
+
+## Docs
+
+- [`learnings/`](learnings/README.md) — what was learned the expensive
+  way, dated. Read before optimising anything.
+- [`stories/`](stories/) — design decisions and phasing.
+
 ## License
 
 [MIT](LICENSE)
