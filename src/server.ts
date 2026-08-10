@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { loadContextText } from "./config.js";
+import { hasContext, loadContextText } from "./config.js";
 import { isMissionName, listMissions, loadMission } from "./missions/loader.js";
 import { SseChunkWriter, completeWithPi, openAiCompletion } from "./pi-llm.js";
 import type { OpenAiChatRequest, PiCompletion } from "./types.js";
@@ -84,11 +84,7 @@ function normalizeMessages(entries: VapiCallMessage[]): DashboardMessage[] {
   });
 }
 
-function mergedMessages(call: VapiCall): DashboardMessage[] {
-  const stored = normalizeMessages(call.messages ?? call.artifact?.messages ?? []);
-  const live = liveTranscripts.get(call.id);
-  if (!live) return stored;
-
+function mergeLive(live: LiveTranscript, stored: DashboardMessage[]): DashboardMessage[] {
   const messages = live.messages.length >= stored.length ? [...live.messages] : stored;
   for (const draft of [live.partial, live.assistantDraft]) {
     if (!draft?.message) continue;
@@ -97,6 +93,14 @@ function mergedMessages(call: VapiCall): DashboardMessage[] {
     messages.push(draft);
   }
   return messages;
+}
+
+function mergedMessages(call: VapiCall): DashboardMessage[] {
+  const stored = normalizeMessages(call.messages ?? call.artifact?.messages ?? []);
+  const live = liveTranscripts.get(call.id);
+  // Prefer whatever we captured live: our copy of Vance's side is the text we
+  // actually sent to be spoken, where Vapi's is a transcription of the audio.
+  return live ? mergeLive(live, stored) : stored;
 }
 
 function dashboardCall(call: VapiCall): unknown {
@@ -214,11 +218,15 @@ function handleVapiEvent(payload: any): void {
   }
 
   if (message.type === "end-of-call-report") {
-    if (Array.isArray(message.artifact?.messages)) {
+    // Only fall back to the artifact if we never captured the call ourselves.
+    // Vapi's artifact carries STT of Vance's own audio, so adopting it here
+    // would undo the whole point of ignoring assistant transcripts above and
+    // put "Cream" back in the record at the last moment.
+    if (Array.isArray(message.artifact?.messages) && live.messages.length === 0) {
       live.messages = normalizeMessages(message.artifact.messages);
-      live.partial = undefined;
-      live.assistantDraft = undefined;
     }
+    live.partial = undefined;
+    live.assistantDraft = undefined;
     const analysis = message.analysis ?? call?.analysis;
     if (analysis?.structuredData || analysis?.summary) {
       live.analysis = { summary: analysis.summary, structuredData: analysis.structuredData };
@@ -307,7 +315,12 @@ const server = createServer(async (req, res) => {
         ok: true,
         callerNumber: process.env.VANCE_CALLER_NUMBER ?? "",
         defaultDestination: process.env.DEFAULT_DESTINATION ?? "",
-        missions: await listMissions(),
+        missions: await Promise.all(
+          (await listMissions()).map(async (mission) => ({
+            ...mission,
+            hasContext: await hasContext(mission.name),
+          })),
+        ),
       });
     }
 

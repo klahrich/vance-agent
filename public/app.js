@@ -21,6 +21,7 @@ const transcriptState = document.querySelector("#transcript-state");
 const missionSelect = document.querySelector("#mission");
 const missionDescription = document.querySelector("#mission-description");
 const contextInput = document.querySelector("#context");
+const contextWarning = document.querySelector("#context-warning");
 const steerForm = document.querySelector("#steer-form");
 const steerInput = document.querySelector("#steer-input");
 const steerButton = document.querySelector("#steer-button");
@@ -419,6 +420,27 @@ function renderMissions(missions) {
 function describeMission() {
   const mission = (state.missions || []).find((m) => m.name === missionSelect.value);
   missionDescription.textContent = mission ? mission.error || mission.description : "";
+  updateContextWarning();
+}
+
+// A call placed with no background still connects and still sounds fine — the
+// agent simply knows nothing, and you only find out from the transcript
+// afterwards. Say so before dialling.
+function updateContextWarning() {
+  const mission = (state.missions || []).find((m) => m.name === missionSelect.value);
+  const typed = contextInput.value.trim().length > 0;
+  const stored = Boolean(mission?.hasContext);
+  if (typed) {
+    contextWarning.textContent = "Using the background typed below.";
+    contextWarning.className = "field-hint";
+  } else if (stored) {
+    contextWarning.textContent = `Using the saved background for ${mission.name}.`;
+    contextWarning.className = "field-hint";
+  } else {
+    contextWarning.textContent =
+      "No background saved for this mission — Vance will go in knowing nothing.";
+    contextWarning.className = "field-hint is-warning";
+  }
 }
 
 function renderOutcome(analysis) {
@@ -507,6 +529,7 @@ callForm.addEventListener("submit", async (event) => {
 });
 
 missionSelect.addEventListener("change", describeMission);
+contextInput.addEventListener("input", updateContextWarning);
 
 copyOutcome.addEventListener("click", async () => {
   if (!state.outcomeJson) return;

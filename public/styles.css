@@ -609,3 +609,8 @@ footer {
   line-height: 1.45;
   white-space: pre;
 }
+
+.field-hint.is-warning {
+  color: #f0b429;
+  opacity: 1;
+}
