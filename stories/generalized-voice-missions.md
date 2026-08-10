@@ -306,12 +306,39 @@ person concludes the call has dropped and starts talking or hangs up.
 So streaming is worth keeping: not as a median improvement, as tail
 insurance against the turns that would otherwise break the call.
 
-The remaining ~2.3s is model time-to-first-token, with a wide spread
-(938ms to 4105ms observed). That variance is worse than the mean: a
-consistently slow agent is something people adapt to, an unpredictable
-one gets talked over. Levers not yet tried: a faster model tier, an
-explicitly chosen region, and prompt caching — which on this evidence
-should be pursued for cost rather than for latency.
+### Then the actual answer: reasoning effort
+
+The remaining ~2.3s was reasoning. `PI_REASONING_EFFORT=none`:
+
+| | median first token | spread |
+|---|---|---|
+| reasoning `low` | 2381ms | 938–4105ms |
+| reasoning `none` | **902ms** | **549–960ms** |
+
+The spread matters more than the median. People adapt to an agent that
+is consistently slow; they talk over one that is unpredictable, and a
+4-second outlier reads as a dropped call.
+
+Reasoning tokens are generated before any text exists and cannot be
+streamed, so they land entirely inside the silence after the other
+person stops speaking. And a phone conversation is mostly reflex — ask
+the obvious follow-up, acknowledge, keep the thread — so there is little
+to deliberate about. Raise it only if a mission genuinely needs
+deliberation and can afford the pause.
+
+Two implementation notes worth keeping:
+
+- Pi talks to the **Responses API**, so the field is `reasoning.effort`,
+  not the chat-completions `reasoning_effort`. The wrong one 400s on
+  every turn, and because the SSE stream has already been opened with a
+  200 by then, the symptom is not an error — it is Vance silently never
+  speaking for the whole call. Worth remembering as a failure mode.
+- Pi's own `thinkingLevel` type has no "off", which is why this goes
+  through the `onPayload` hook rather than agent state.
+
+**Order of what actually mattered:** reasoning effort (2.6×) ≫ tail
+protection from streaming (up to 9s on some turns) ≫ model choice ≫
+streaming's median gain (~18ms) ≈ prompt size (nothing).
 
 **Rejected: summarising or windowing the transcript.** It is the obvious
 fix and it is wrong here. A discovery call's whole value is that minute
