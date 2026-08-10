@@ -179,7 +179,13 @@ function handleVapiEvent(payload: any): void {
   }
 
   if (message.type === "transcript" || String(message.type).startsWith("transcript[")) {
-    const role = message.role === "assistant" || message.role === "bot" ? "vance" : "them";
+    // Only transcribe the other side. Vapi runs STT over Vance's own audio
+    // too, which round-trips text -> speech -> text and quietly corrupts it
+    // ("Karim" came back as "Cream"). We already know exactly what Vance said,
+    // from the completion and from conversation-update, so prefer those and
+    // let the transcript stand only for the person we cannot read directly.
+    if (message.role === "assistant" || message.role === "bot") return;
+    const role = "them";
     const next: DashboardMessage = {
       role,
       message: message.transcript ?? message.originalTranscript ?? "",
